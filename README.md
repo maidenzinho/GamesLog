@@ -80,9 +80,7 @@ main.py                 # Código principal
 biblioteca.json         # Biblioteca dos jogos
 perfil.json             # Dados do perfil do usuário
 prints/                 # Pasta dos prints do perfil (criada automaticamente)
-img/                    # Imagens, logo, wallpapers (adicione suas imagens!)
 backups/                # Backups automáticos incrementais
-requirements.txt        # Dependências Python
 README.md               # Este arquivo
 ```
 
