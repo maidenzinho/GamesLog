@@ -61,6 +61,8 @@ pip install PyQt5 pandas matplotlib pillow requests
   ```python
   RAWG_KEY = "SUA_CHAVE_AQUI"
   ```
+  ![image](https://github.com/user-attachments/assets/9d5e5a2d-b43e-4892-b2d9-0376f28dc385)
+
   Coloque sua chave ali (sem ela, só upload manual de capas).
 
 ### 4. Execute o programa
