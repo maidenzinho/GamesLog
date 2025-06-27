@@ -36,7 +36,7 @@ Gameslog é um aplicativo desktop minimalista, inspirado na Steam, para organiza
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/seuusuario/gameslog.git
+git clone https://github.com/maidenzinho/GamesLog.git
 cd gameslog
 ```
 
@@ -46,13 +46,9 @@ Ambiente virtual recomendado:
 
 ```bash
 python -m venv venv
-source venv/bin/activate    # Linux/macOS
-venv\Scriptsctivate.bat   # Windows
-
-pip install -r requirements.txt
 ```
 
-Ou manualmente:
+Ou Dependências:
 
 ```bash
 pip install PyQt5 pandas matplotlib pillow requests
