@@ -1,4 +1,4 @@
-import sys, os, json, shutil, datetime, requests
+import sys, os, json, shutil, datetime, requests, csv, re, unicodedata
 import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -14,6 +14,34 @@ from PIL import Image
 
 RAWG_API = "https://api.rawg.io/api/games"
 RAWG_KEY = ""
+
+# --- RAWG API Key (fallbacks) ---
+# Se RAWG_KEY estiver vazio, tentamos:
+# 1) Variáveis de ambiente RAWG_KEY ou RAWG_API_KEY
+# 2) Ler a chave do arquivo main.py (caso você já tenha colocado lá)
+def _load_rawg_key_fallback():
+    global RAWG_KEY
+    if RAWG_KEY:
+        return
+    env_key = os.getenv("RAWG_KEY") or os.getenv("RAWG_API_KEY")
+    if env_key:
+        RAWG_KEY = env_key.strip()
+        return
+    # tenta extrair do main.py (mesma pasta)
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(base_dir, "main.py")
+        if os.path.exists(candidate):
+            txt = open(candidate, "r", encoding="utf-8", errors="ignore").read()
+            m = re.search(r'RAWG_KEY\s*=\s*["\']([^"\']+)["\']', txt)
+            if m:
+                RAWG_KEY = m.group(1).strip()
+                return
+    except Exception:
+        pass
+
+_load_rawg_key_fallback()
+
 
 PLATAFORMAS = ["Steam", "Epic Games", "PSN", "Xbox", "GOG", "Nintendo", "Outros"]
 STATUS_OPTIONS = ["Finalizado", "Jogando", "Não jogado", "Desejado"]
@@ -367,6 +395,9 @@ class GameLibrary(QWidget):
         # ---------- Exportar ----------
         self.page_export = QWidget()
         vbox_export = QVBoxLayout(self.page_export)
+        self.import_btn = QPushButton(icon_from_url(ICON_URLS["Upload"]), "Importar Excel/TXT/CSV/JSON")
+        self.import_btn.clicked.connect(self.import_games)
+        vbox_export.addWidget(self.import_btn)
         self.export_btn = QPushButton(icon_from_url(ICON_URLS["Exportar"]), "Exportar Excel")
         self.export_btn.clicked.connect(self.export_excel)
         vbox_export.addWidget(self.export_btn)
@@ -770,6 +801,245 @@ class GameLibrary(QWidget):
         df = pd.DataFrame(self.games)
         df.to_excel(path, index=False)
         self.show_toast(f"Planilha salva!")
+
+
+    def import_games(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar jogos",
+            "",
+            "Arquivos suportados (*.xlsx *.xls *.csv *.txt *.json)"
+        )
+        if not path:
+            return
+        try:
+            imported, skipped = self._import_from_file(path)
+            if imported > 0:
+                self.save_library()
+                self.refresh_library()
+                self.refresh_favs()
+            self.show_toast(f"Importados: {imported} | Ignorados: {skipped}", 2600)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro ao importar", f"Não foi possível importar.\n\nDetalhes: {e}")
+
+    def _import_from_file(self, path):
+        ext = os.path.splitext(path)[1].lower()
+        if ext in [".xlsx", ".xls"]:
+            df = pd.read_excel(path)
+            return self._import_from_dataframe(df)
+        if ext == ".csv":
+            df = pd.read_csv(path)
+            return self._import_from_dataframe(df)
+        if ext == ".json":
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data = [data]
+            df = pd.DataFrame(data)
+            return self._import_from_dataframe(df)
+        if ext == ".txt":
+            rows = self._parse_txt_games(path)
+            df = pd.DataFrame(rows)
+            return self._import_from_dataframe(df)
+        raise ValueError("Formato não suportado.")
+
+    def _norm_col(self, s):
+        s = str(s).strip().lower()
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = s.replace("/", " ").replace("-", " ").replace("_", " ")
+        s = " ".join(s.split())
+        return s
+
+    def _find_col(self, df, candidates):
+        norm_cols = {self._norm_col(c): c for c in df.columns}
+        for cand in candidates:
+            key = self._norm_col(cand)
+            if key in norm_cols:
+                return norm_cols[key]
+        # tenta contains
+        for cand in candidates:
+            key = self._norm_col(cand)
+            for n, orig in norm_cols.items():
+                if key in n:
+                    return orig
+        return None
+
+    def _coerce_str(self, v):
+        if v is None:
+            return ""
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        return str(v).strip()
+
+    def _normalize_platform(self, platform):
+        p = self._coerce_str(platform)
+        if not p:
+            return "Outros"
+        pl = p.lower()
+        for opt in PLATAFORMAS:
+            if opt.lower() in pl:
+                return opt
+        return "Outros"
+
+    def _normalize_status(self, status):
+        s = self._coerce_str(status)
+        if not s:
+            return "Não jogado"
+        sl = s.lower()
+        for opt in STATUS_OPTIONS:
+            if opt.lower() == sl:
+                return opt
+        # aproximações comuns
+        if "final" in sl or "zer" in sl or "complete" in sl:
+            return "Finalizado"
+        if "jog" in sl or "play" in sl or "andamento" in sl:
+            return "Jogando"
+        if "desej" in sl or "wish" in sl or "want" in sl:
+            return "Desejado"
+        if "nao" in sl or "não" in sl or "not" in sl:
+            return "Não jogado"
+        return "Não jogado"
+
+    def _parse_txt_games(self, path):
+        # 1) tenta JSON (lista/dict)
+        with open(path, "r", encoding="utf-8-sig") as f:
+            raw = f.read().strip()
+        if not raw:
+            return []
+        if raw.startswith("{") or raw.startswith("["):
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return [data]
+                if isinstance(data, list):
+                    return [x for x in data if isinstance(x, dict)]
+            except Exception:
+                pass
+
+        # 2) tenta CSV delimitado (primeira linha = cabeçalho)
+        lines = raw.splitlines()
+        sample = "\n".join(lines[:10])
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=";,	|")
+        except Exception:
+            # fallback: escolhe o delimitador mais frequente na primeira linha
+            first = lines[0]
+            candidates = [";", ",", "\t", "|"]
+            delim = max(candidates, key=lambda d: first.count(d))
+            class D: pass
+            dialect = D()
+            dialect.delimiter = "\t" if delim == "\t" else delim
+
+        reader = csv.DictReader(lines, delimiter=dialect.delimiter)
+        rows = []
+        for r in reader:
+            if not any((v or "").strip() for v in r.values()):
+                continue
+            rows.append(r)
+        return rows
+
+    def _import_from_dataframe(self, df):
+        if df is None or df.empty:
+            return (0, 0)
+
+        # Descobre colunas (aceita variações)
+        col_nome = self._find_col(df, ["Nome", "name", "jogo"])
+        col_plat = self._find_col(df, ["Plataforma/Loja", "Plataforma", "Loja", "platform", "store"])
+        col_data = self._find_col(df, ["Data de compra", "data compra", "purchase date"])
+        col_preco = self._find_col(df, ["Preço pago", "preco pago", "preco", "price"])
+        col_comp = self._find_col(df, ["Nº comprovante", "numero comprovante", "comprovante", "receipt"])
+        col_nota = self._find_col(df, ["Nota pessoal", "nota", "rating", "score"])
+        col_status = self._find_col(df, ["Status", "estado"])
+        col_anot = self._find_col(df, ["Anotações", "anotacoes", "notes"])
+        col_img = self._find_col(df, ["Imagem", "capa", "cover", "image"])
+        col_fav = self._find_col(df, ["Favorito", "fav"])
+        col_img_manual = self._find_col(df, ["Imagem_manual", "imagem manual"])
+
+        if not col_nome:
+            raise ValueError("Coluna 'Nome' não encontrada no arquivo.")
+
+        existing = set((g.get("Nome", "").strip().lower(), g.get("Plataforma/Loja", "").strip().lower()) for g in self.games)
+        imported = 0
+        skipped = 0
+
+        for _, row in df.iterrows():
+            nome = self._coerce_str(row.get(col_nome)) if col_nome else ""
+            if not nome:
+                skipped += 1
+                continue
+
+            plataforma = self._normalize_platform(row.get(col_plat)) if col_plat else "Outros"
+            key = (nome.strip().lower(), plataforma.strip().lower())
+            if key in existing:
+                skipped += 1
+                continue
+
+            data_compra = self._coerce_str(row.get(col_data)) if col_data else ""
+            preco = self._coerce_str(row.get(col_preco)) if col_preco else ""
+            comprovante = self._coerce_str(row.get(col_comp)) if col_comp else ""
+            nota = self._coerce_str(row.get(col_nota)) if col_nota else ""
+            status = self._normalize_status(row.get(col_status)) if col_status else "Não jogado"
+            anot = self._coerce_str(row.get(col_anot)) if col_anot else ""
+
+            img_val = self._coerce_str(row.get(col_img)) if col_img else ""
+            fav_val = row.get(col_fav) if col_fav else False
+            manual_val = row.get(col_img_manual) if col_img_manual else None
+
+            imagem = ""
+            imagem_manual = False
+            if img_val:
+                if img_val.startswith("http://") or img_val.startswith("https://"):
+                    imagem = img_val
+                    imagem_manual = False
+                else:
+                    # provavelmente hex (quando veio de upload manual)
+                    if re.fullmatch(r"[0-9a-fA-F]+", img_val) and len(img_val) > 50:
+                        imagem = img_val
+                        imagem_manual = True
+
+            if manual_val is not None:
+                # respeita a coluna se ela existir
+                imagem_manual = bool(manual_val)
+
+            # Detalhes adicionais (se vierem no arquivo)
+            genero = self._coerce_str(row.get(self._find_col(df, ["Gênero", "genero", "genre"]))) if self._find_col(df, ["Gênero", "genero", "genre"]) else ""
+            descricao = self._coerce_str(row.get(self._find_col(df, ["Descrição", "descricao", "description"]))) if self._find_col(df, ["Descrição", "descricao", "description"]) else ""
+            data_lanc = self._coerce_str(row.get(self._find_col(df, ["Data lançamento", "data lancamento", "released"]))) if self._find_col(df, ["Data lançamento", "data lancamento", "released"]) else ""
+            dev = self._coerce_str(row.get(self._find_col(df, ["Desenvolvedor", "dev", "developer"]))) if self._find_col(df, ["Desenvolvedor", "dev", "developer"]) else ""
+            link = self._coerce_str(row.get(self._find_col(df, ["Link", "url"]))) if self._find_col(df, ["Link", "url"]) else ""
+
+            # Se não tem imagem/detalhes, tenta puxar (quando RAWG_KEY existir)
+            dados_jogo = {}
+            if not imagem and not genero and not descricao and not data_lanc and not dev and not link:
+                dados_jogo = self.fetch_game_data(nome, plataforma)
+
+            game = {
+                "Nome": dados_jogo.get("nome", nome),
+                "Plataforma/Loja": plataforma,
+                "Data de compra": data_compra,
+                "Preço pago": preco,
+                "Nº comprovante": comprovante,
+                "Nota pessoal": nota,
+                "Status": status,
+                "Imagem": imagem if imagem else dados_jogo.get("imagem", ""),
+                "Imagem_manual": bool(imagem_manual),
+                "Gênero": genero if genero else dados_jogo.get("genero", ""),
+                "Descrição": descricao if descricao else dados_jogo.get("descricao", ""),
+                "Data lançamento": data_lanc if data_lanc else dados_jogo.get("data_lancamento", ""),
+                "Desenvolvedor": dev if dev else dados_jogo.get("dev", ""),
+                "Link": link if link else dados_jogo.get("link", ""),
+                "Favorito": bool(fav_val) if str(fav_val).strip() != "" else False,
+                "Anotações": anot
+            }
+
+            self.games.append(game)
+            existing.add(key)
+            imported += 1
+
+        return imported, skipped
 
     def show_summary(self):
         if not self.games:
