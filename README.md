@@ -114,6 +114,129 @@ README.md               # Este arquivo
 - **Conquistas**: Contador automático (integração futura com Steam)
 - **Backup incremental**: Toda modificação gera um backup seguro em `/backups`
 - **Nenhuma dependência online obrigatória**: Tudo salvo local, sem login ou upload em nuvem
+- ** Importe seu arquivos**: txt, xlsx, xls, json e csv
+
+# 📥 Importação de Jogos — Guia de Preenchimento (TXT e Excel)
+
+Este guia explica **como preencher corretamente arquivos Excel (.xlsx/.xls) e TXT**
+para importar jogos automaticamente para a biblioteca do sistema.
+
+---
+
+## ✅ Formatos Aceitos
+- **Excel:** `.xlsx`, `.xls`
+- **Texto:** `.txt`
+- **CSV:** `.csv`
+- **JSON:** `.json` ou `.txt` contendo JSON
+
+---
+
+## 📌 Campos Reconhecidos
+
+### Obrigatórios
+- **Nome** → Nome do jogo
+
+### Opcionais (recomendados)
+- Plataforma  
+- Data de compra  
+- Preço pago  
+- Nº comprovante  
+- Nota pessoal  
+- Status  
+- Anotações  
+- Imagem  
+- Gênero  
+- Desenvolvedor  
+- Data lançamento  
+- Link  
+- Favorito  
+
+> ⚠️ Os nomes das colunas **não diferenciam maiúsculas/minúsculas**.
+
+---
+
+## 📊 Exemplo — Excel (.xlsx)
+
+| Nome              | Plataforma | Data de compra | Preço pago | Nº comprovante | Nota pessoal | Status     | Anotações            |
+|-------------------|------------|---------------|------------|----------------|--------------|------------|----------------------|
+| Cyberpunk 2077    | Steam      | 2023-11-25    | 149.90     | STEAM123       | 9            | Finalizado | História excelente   |
+| GTA V             | Epic Games | 2022-06-10    | 0          | EPICFREE       | 8            | Jogando    | Modo online          |
+
+📌 **Data aceita:** `YYYY-MM-DD`
+
+---
+
+## 📄 Exemplo — TXT Delimitado (; , | TAB)
+
+```
+Nome;Plataforma;Data de compra;Preço pago;Nº comprovante;Nota pessoal;Status;Anotações
+Cyberpunk 2077;Steam;2023-11-25;149.90;STEAM123;9;Finalizado;História excelente
+GTA V;Epic Games;2022-06-10;0;EPICFREE;8;Jogando;Modo online
+```
+
+Delimitadores aceitos:
+- `;` (recomendado)
+- `,`
+- `|`
+- TAB
+
+---
+
+## 🧾 Exemplo — TXT ou JSON
+
+```
+[
+  {
+    "Nome": "Cyberpunk 2077",
+    "Plataforma": "Steam",
+    "Data de compra": "2023-11-25",
+    "Preço pago": 149.90,
+    "Nota pessoal": 9,
+    "Status": "Finalizado"
+  },
+  {
+    "Nome": "GTA V",
+    "Plataforma": "Epic Games",
+    "Status": "Jogando"
+  }
+]
+```
+
+---
+
+## 🎮 Status Aceitos
+- Não jogado
+- Jogando
+- Finalizado
+- Dropado
+- Platinado
+
+(O sistema corrige automaticamente variações como: *finalizei*, *zerado*, *playing* etc.)
+
+---
+
+## ❌ Erros Comuns
+- Arquivo sem a coluna **Nome**
+- Datas fora do padrão
+- Texto salvo como `.txt` com encoding estranho (use UTF-8)
+- Linhas vazias no meio do arquivo
+
+---
+
+## ✨ Dicas
+✔ Use Excel para grandes bibliotecas  
+✔ Use TXT para edição rápida  
+✔ Evite duplicar jogos (o sistema ignora repetidos)  
+✔ Quanto mais campos preencher, mais organizada fica a biblioteca  
+
+---
+
+## 🚀 Importação
+No sistema:
+**Exportar → Importar Excel/TXT/CSV/JSON**
+
+Pronto! 🎉
+
 
 ---
 
